@@ -4568,6 +4568,24 @@ def build_driver(*, headless: bool = False) -> webdriver.Chrome:
     # Fewer renderer/chrome crashes during long Selenium runs (safe on Windows/Linux).
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-features=TranslateUI")
+    # Linux VPS + running as root: Chrome will exit unless sandbox is disabled.
+    if sys.platform.startswith("linux"):
+        try:
+            if hasattr(os, "geteuid") and os.geteuid() == 0:  # type: ignore[attr-defined]
+                options.add_argument("--no-sandbox")
+                options.add_argument("--disable-setuid-sandbox")
+        except Exception:
+            pass
+        # Reduce GPU/renderer assumptions on servers.
+        options.add_argument("--disable-software-rasterizer")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--no-first-run")
+        options.add_argument("--no-default-browser-check")
+
+    # Allow overriding Chrome binary location (useful when only chromium-browser exists).
+    chrome_bin = (os.getenv("CHROME_BINARY") or "").strip()
+    if chrome_bin:
+        options.binary_location = chrome_bin
     if headless:
         # Chrome's newer headless; works without X11/Wayland (typical Linux VPS).
         options.add_argument("--headless=new")
