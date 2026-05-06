@@ -4038,6 +4038,48 @@ def _go_next_page_single(
     except Exception:
         pass
 
+    # Some ApplyBoard pages use an internal scroll container (not window scroll).
+    # If the paginator lives below the visible viewport inside that container, Selenium won't "see" it as displayed.
+    # Proactively scroll the likely grid/table containers to the bottom so pagination controls become visible.
+    try:
+        driver.execute_script(
+            """
+            (function(){
+              const sels = [
+                ".MuiTableContainer-root",
+                "[class*='MuiTableContainer']",
+                "[role='grid']",
+                "[role='table']",
+                ".MuiDataGrid-virtualScroller",
+                "[class*='DataGrid'][class*='Scroller']",
+              ];
+              function isScrollable(el){
+                if(!el) return false;
+                const st = window.getComputedStyle(el);
+                const oy = st.overflowY || st.overflow;
+                return (oy === "auto" || oy === "scroll") && el.scrollHeight > (el.clientHeight + 20);
+              }
+              const cand = [];
+              sels.forEach(s => document.querySelectorAll(s).forEach(el => cand.push(el)));
+              // also consider parents of grids (often the scroll container)
+              cand.slice(0, 30).forEach(el => { if(el && el.parentElement) cand.push(el.parentElement); });
+              const uniq = Array.from(new Set(cand));
+              for (const el of uniq){
+                try{
+                  if(isScrollable(el)){
+                    el.scrollTop = el.scrollHeight;
+                  }
+                }catch(e){}
+              }
+              // final fallback: window scroll
+              try{ window.scrollTo(0, document.body.scrollHeight); }catch(e){}
+            })();
+            """
+        )
+        time.sleep(0.25 if fast else 0.45)
+    except Exception:
+        pass
+
     def _dump_pagination_debug(tag: str) -> None:
         if quiet:
             return
