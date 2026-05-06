@@ -53,13 +53,15 @@ def _parse_php_db_config(db_php_path: Path) -> Optional[Dict[str, str]]:
     db = pick("db") or pick("dbname")  # db.php uses $dbname
     user = pick("user")
     pw = pick("pass")
+    port_s = pick("port")
+    port = int(port_s) if port_s.isdigit() else 3306
     if not host or not db or not user:
         return None
-    return {"host": host, "db": db, "user": user, "password": pw}
+    return {"host": host, "db": db, "user": user, "password": pw, "port": str(port)}
 
 
 class MySQLSink:
-    def __init__(self, host: str, db: str, user: str, password: str) -> None:
+    def __init__(self, host: str, db: str, user: str, password: str, port: int = 3306) -> None:
         import mysql.connector  # type: ignore
 
         self._mysql = mysql.connector
@@ -67,6 +69,7 @@ class MySQLSink:
         self.db = db
         self.user = user
         self.password = password
+        self.port = int(port or 3306)
         self._conn = None
 
     def connect(self) -> None:
@@ -74,6 +77,7 @@ class MySQLSink:
             return
         self._conn = self._mysql.connect(
             host=self.host,
+            port=self.port,
             user=self.user,
             password=self.password,
             database=self.db,
@@ -278,6 +282,29 @@ def effective_login_url(cli_override: str = "") -> str:
 
 # Primary Students destination requested by the user.
 STUDENTS_URL = "https://www.applyboard.com/students"
+
+
+def effective_mysql_db_php_path(*, base_dir: Path, cli_value: str) -> Path:
+    """
+    Decide which db.php to use for MySQL credentials.
+    Priority:
+    - CLI --mysql-db-php (if provided)
+    - env APPLYBOARD_MYSQL_DB_PHP
+    - ./db.php next to this script (useful on VPS: /var/www/.../db.php)
+    - Windows default XAMPP db.php (keeps your local workflow)
+    """
+    v = (cli_value or "").strip()
+    if v:
+        return Path(v)
+    v = (os.getenv("APPLYBOARD_MYSQL_DB_PHP") or "").strip()
+    if v:
+        return Path(v)
+    local = base_dir / "db.php"
+    if local.exists():
+        return local
+    if sys.platform == "win32":
+        return Path(r"C:\xampp\htdocs\parrot_mis\db.php")
+    return local
 
 # Set after first successful navigation to a working Students list route for this session.
 _EFFECTIVE_STUDENTS_URL: Optional[str] = None
@@ -4620,9 +4647,21 @@ def main() -> None:
     )
     parser.add_argument(
         "--mysql-db-php",
-        default=r"C:\xampp\htdocs\parrot_mis\db.php",
-        help="Path to PHP db config (db.php).",
+        default="",
+        help=(
+            "Path to PHP db config (db.php). If omitted: uses APPLYBOARD_MYSQL_DB_PHP, or ./db.php next to the script, "
+            "or Windows default XAMPP db.php."
+        ),
     )
+    parser.add_argument("--mysql-host", default="", help="MySQL host (overrides db.php). Env: APPLYBOARD_MYSQL_HOST")
+    parser.add_argument("--mysql-db", default="", help="MySQL database name (overrides db.php). Env: APPLYBOARD_MYSQL_DB")
+    parser.add_argument("--mysql-user", default="", help="MySQL username (overrides db.php). Env: APPLYBOARD_MYSQL_USER")
+    parser.add_argument(
+        "--mysql-password",
+        default="",
+        help="MySQL password (overrides db.php). Env: APPLYBOARD_MYSQL_PASSWORD",
+    )
+    parser.add_argument("--mysql-port", type=int, default=0, help="MySQL port (overrides db.php). Env: APPLYBOARD_MYSQL_PORT")
     parser.add_argument(
         "--mysql-table",
         default="applyboard_students",
@@ -4695,14 +4734,32 @@ def main() -> None:
         # Initialize MySQL sink (best-effort)
         global _MYSQL_SINK
         if not args.no_mysql:
-            cfg = _parse_php_db_config(Path(args.mysql_db_php))
+            host = (args.mysql_host or os.getenv("APPLYBOARD_MYSQL_HOST") or "").strip()
+            dbn = (args.mysql_db or os.getenv("APPLYBOARD_MYSQL_DB") or "").strip()
+            usr = (args.mysql_user or os.getenv("APPLYBOARD_MYSQL_USER") or "").strip()
+            pw = args.mysql_password or os.getenv("APPLYBOARD_MYSQL_PASSWORD") or ""
+            port = int(args.mysql_port or int(os.getenv("APPLYBOARD_MYSQL_PORT", "0") or "0") or 0)
+
+            cfg: Optional[Dict[str, str]] = None
+            if host and dbn and usr:
+                cfg = {"host": host, "db": dbn, "user": usr, "password": pw, "port": str(port or 3306)}
+            else:
+                php_path = effective_mysql_db_php_path(base_dir=base_dir, cli_value=args.mysql_db_php)
+                cfg = _parse_php_db_config(php_path)
+                if cfg is None:
+                    print(
+                        f"[WARN] MySQL disabled (no config). Provide --mysql-host/--mysql-db/--mysql-user "
+                        f"or a db.php via --mysql-db-php / APPLYBOARD_MYSQL_DB_PHP. Tried: {php_path}",
+                        flush=True,
+                    )
             if cfg:
                 try:
                     _MYSQL_SINK = MySQLSink(
                         host=cfg["host"],
                         db=cfg["db"],
                         user=cfg["user"],
-                        password=cfg["password"],
+                        password=cfg.get("password", ""),
+                        port=int(cfg.get("port", "3306") or "3306"),
                     )
                     _MYSQL_SINK.ensure_table(table=args.mysql_table)
                     print(f"MySQL upsert enabled -> {cfg['db']}.{args.mysql_table}", flush=True)
