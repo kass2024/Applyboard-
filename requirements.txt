@@ -1,5 +1,7 @@
 selenium>=4.21.0
-pandas>=2.2.0
+# NOTE: Many VPS images ship older Python (e.g., 3.8/3.9). pandas 2.2+ may not have wheels there.
+# Keep compatible while still modern enough for this scraper.
+pandas>=1.5.3,<2.1
 openpyxl>=3.1.2
 python-dotenv>=1.0.1
 openai>=1.40.0
