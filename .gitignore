@@ -1,0 +1,28 @@
+# Secrets & local config
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+env/
+
+# Scraper output & debug artifacts
+errors/
+applyboard_students*.xlsx
+applyboard_students*.csv
+*.log
+
+# Local DB credentials (often copied from XAMPP / hosting)
+db.php
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
